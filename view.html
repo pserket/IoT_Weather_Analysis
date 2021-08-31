@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+
+<html>
+    <head profile="http://www.w3.org/2005/10/profile">
+        
+        <title>DSC190 Data Viewer</title>
+        
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+
+        <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
+
+        <link rel="stylesheet" type="text/css" href="tables.css">
+
+        <style>
+        html,body,h1,h2,h3,h4,h5 {font-family: "Open Sans", sans-serif}
+        </style>
+
+    </head>
+<body class="w3-theme-l5">
+    <center><h1>DSC 190 Eye O' Tea (05)</h1></center>
+    <div class="w3-container w3-card w3-white w3-round w3-margin-right w3-margin-left"><br>
+
+        <span class="w3-right w3-opacity">5 Sec</span>
+        
+      
+        <div class="w3-row-padding" style="margin:0 -16px">
+            <h4>Device Info</h4><br>
+            <table class="tableList" id="groupsTable">
+                <thead>
+                    <tr>
+                        <th>Last Seen</th>
+                        <th>MAC</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                </tbody>
+            </table>    
+            <br>
+            <span class="w3-right w3-opacity">7 Sec</span>
+            <h4>BLE Info</h4><br>
+            <table class="tableList" id="bleTable">
+                <thead>
+                    
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Device MAC</th>
+                        <th>BLE MAC</th>
+                        <th>RSSI</th>
+                    </tr>
+                </thead>
+                <tbody>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+	<br>
+    <span id="debugStr"></span>
+
+<script>
+
+var to_parse;
+var grpTimer;
+var bleTimer;
+
+var gTable = document.getElementById('groupsTable'); 
+var bTable = document.getElementById('bleTable'); 
+
+// now continuously get server updates
+grpTimer = setInterval(updateGroups, 5000);    // 5 seconds
+bleTimer = setInterval(updateBLE, 7000);    // 7 seconds
+
+// get activity update
+updateGroups();
+updateBLE();
+
+//============== UPDATE Students TABLE =================
+function parse_date(item) {
+    var patt1 = /datetime.datetime\([0-9 | ,]+\)/g; 
+    var toReplace = item.match(/[0-9]+/g);
+    var result = item.replace(patt1,toReplace);
+    var date_split = result.split(",");
+    var year = date_split[0];
+    var month = date_split[1];
+    if (month.length == 1) {
+        month = "0" + month;
+    }
+    var day = date_split[2];
+    if (day.length == 1) {
+        day = "0" + day;
+    }
+    var hour = date_split[3];
+    if (hour.length == 1) {
+        hour = "0" + hour;
+    }
+    var min = date_split[4];
+    if (min.length == 1) {
+        min = "0" + min;
+    }
+    var sec = date_split[5];
+    if (sec.length == 1) {
+        sec = "0" + sec;
+    }
+    var formatted = "\""+String(month)+"/"+String(day)+"/"+String(year)+" "+String(hour)+":"+String(min)+":"+String(sec)+"\"";
+    to_parse = to_parse.replace(item,String(formatted));
+}
+
+function clearGroups() {
+
+    // clear all except first row
+    var x = gTable.rows.length;
+    for (var i=x-1; i>0; i--)
+        gTable.deleteRow(i);
+    
+}
+
+function clearBLE() {
+
+    // clear all except first row
+    var x = bTable.rows.length;
+    for (var i=x-1; i>0; i--)
+        bTable.deleteRow(i);  
+}
+
+function refreshGroups(s) {
+    var row = gTable.insertRow();
+    var cellLastSeen = row.insertCell(0);
+    var cellMAC = row.insertCell(1);
+    var cellStatus = row.insertCell(2);
+
+    // fill cells:
+    cellLastSeen.innerHTML = s.lastseen;
+    cellMAC.innerHTML = s.mac;
+    cellStatus.innerHTML = s.status;
+}
+
+function refreshBLE(s) {
+    var row = bTable.insertRow();
+    var cellTimestamp = row.insertCell(0);
+    var celldevMAC = row.insertCell(1);
+    var cellbleMAC = row.insertCell(2);
+    var cellRSSI = row.insertCell(3);
+
+    // fill cells:
+    cellTimestamp.innerHTML = s.timestamp;
+    celldevMAC.innerHTML = s.devmac;
+    cellbleMAC.innerHTML = s.blemac;
+    cellRSSI.innerHTML = s.blerssi;
+}
+    
+
+// load the status of all table entries
+function updateGroups() {
+
+    var xmlhttp = new XMLHttpRequest();
+    xmlhttp.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            to_parse = this.responseText.replace(/'/g,'"').replace(/None/g,'"None"');
+            var patt1 = /datetime.datetime\([0-9 | ,]+\)/g; 
+            var display = to_parse.match(patt1)
+            display.forEach(parse_date);
+            var statsObj = JSON.parse(to_parse);
+            clearGroups();
+            // got data
+            // lets loop thru and fill in the data
+            statsObj.devices.forEach(refreshGroups); 
+        }
+    };
+
+	var jObj;
+
+    jObj = {cmd:"LIST",gid:"05"};
+   
+    var jStr = JSON.stringify(jObj);
+
+    //debugStr(jStr);
+    
+    var urlStr = "http://dsc-iot.ucsd.edu/api_gid05/API.py";
+    xmlhttp.open("POST", urlStr, true);
+    xmlhttp.setRequestHeader('Content-Type', 'application/json');
+    xmlhttp.send(jStr);
+}
+
+function updateBLE() {
+    var xmlhttp = new XMLHttpRequest();
+    xmlhttp.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            to_parse = this.responseText.replace(/'/g,'"').replace(/None/g,'"None"');
+            var patt1 = /datetime.datetime\([0-9 | ,]+\)/g; 
+            var display = to_parse.match(patt1)
+            display.forEach(parse_date);
+            // console.log(to_parse);
+            // console.log(to_parse.substring(135,148));
+            to_parse = "[" + to_parse + "]";
+            var statsObj = eval(to_parse);
+            // var statsObj = JSON.parse(to_parse);
+            
+            clearBLE();
+            // got data
+            // lets loop thru and fill in the data
+            statsObj.forEach(refreshBLE); 
+        }
+    };
+
+    var jObj;
+
+    jObj = {cmd:"VIEWBLE",gid:"05"};
+   
+    var jStr = JSON.stringify(jObj);
+
+    //debugStr(jStr);
+    
+    var urlStr = "http://dsc-iot.ucsd.edu/api_gid05/API.py";
+    xmlhttp.open("POST", urlStr, true);
+    xmlhttp.setRequestHeader('Content-Type', 'application/json');
+    xmlhttp.send(jStr);
+}
+
+
+function debugStr(str) {
+    var x = document.getElementById("debugStr");
+    x.innerHTML = str;
+}
+
+</script>
+
+</body>
+</html> 

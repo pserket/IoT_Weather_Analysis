@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>DSC190 Map Viewer</title>
+    <meta name="viewport" content="initial-scale=1.0">
+    <meta charset="utf-8">
+    <link rel="stylesheet" type="text/css" href="tables.css">
+    <style>
+      /* Always set the map height explicitly to define the size of the div
+       * element that contains the map. */
+      #map {
+        height: 85%;
+      }
+      /* Optional: Makes the sample page fill the window. */
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+
+      .subBtn {
+        padding: 10px 20px;
+        background-color: dodgerblue;
+        border: 1px solid #ddd;
+        color: white;
+        cursor: pointer;
+      }
+
+      /* The switch - the box around the slider - https://www.w3schools.com/howto/howto_css_switch.asp */
+        .switch {
+          position: relative;
+          display: inline-block;
+          width: 60px;
+          height: 34px;
+        }
+
+        /* Hide default HTML checkbox */
+        .switch input {
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+
+        /* The slider */
+        .slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: #ccc;
+          -webkit-transition: .4s;
+          transition: .4s;
+        }
+
+        .slider:before {
+          position: absolute;
+          content: "";
+          height: 26px;
+          width: 26px;
+          left: 4px;
+          bottom: 4px;
+          background-color: white;
+          -webkit-transition: .4s;
+          transition: .4s;
+        }
+
+        input:checked + .slider {
+          background-color: #2196F3;
+        }
+
+        input:focus + .slider {
+          box-shadow: 0 0 1px #2196F3;
+        }
+
+        input:checked + .slider:before {
+          -webkit-transform: translateX(26px);
+          -ms-transform: translateX(26px);
+          transform: translateX(26px);
+        }
+
+        /* Rounded sliders */
+        .slider.round {
+          border-radius: 34px;
+        }
+
+        .slider.round:before {
+          border-radius: 50%;
+        }
+        /*.center {
+          position: relative;
+          left:5%;
+          padding: 5px;
+        }*/
+    }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div id="climate_chart" style="width: 450px; height: 450px"></div>
+    <!-- <div class="center"> -->
+    <div style="display: flex;">
+      <!-- toggle for showing group 5 devices or all -->
+      <div style="width: 40%;">
+        <label class="switch" id="TOGGLEDEVICE">
+          <input type="checkbox">
+          <span class="slider round"></span>
+        </label>
+        <b>(Toggle to View Only Group 5 Devices)</b>
+      </div>
+      <div style="width: 60%; display: flex; flex-flow: row wrap;">
+        Start Date:<input id="startDate" type="text" name="start" placeholder="MM:DD HH:MM">
+        End Date:<input id="endDate" type="text" name="end" placeholder="MM:DD HH:MM">
+        <button id="analysisBtn" class="subBtn">Run Analysis</button>
+        <!-- <form style="display: flex; flex-flow: row wrap;" onsubmit="initMap()">
+          <label for="startDate">Start Date:</label>
+          <input type="text" id="startDate" name="fname" value="MM/DD HH:MM">
+          <label for="endDate">End Date:</label>
+          <input type="text" id="endDate" name="lname" value="MM/DD HH:MM">
+          <button class="subBtn" type="button" value="Run Analysis">
+        </form> -->
+      </div> 
+    </div> 
+    <div style="display: flex">
+      <div id="analysis_chart" style="width: 50%;margin: 0px; border: 1px solid black"></div>
+      <div id="hum_chart" style="width: 50%; margin: 0px; border: 1px solid black"></div>
+    </div>
+    <div style="display: flex">
+      <div id="temp_stats" style="width: 50%">
+        <table class="tableList" id="temp_table">
+          <thead>
+            <tr>
+              <th colspan="3" style="text-align: center">Temperature</th>
+            </tr>
+            <tr>
+              <th>Measurement</th>
+              <th>Outside</th>
+              <th>Inside</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="hum_stats" style="width: 50%">
+        <table class="tableList" id="hum_table">
+          <thead>
+            <tr>
+              <th colspan="3" style="text-align: center">Humidity</th>
+            </tr>
+            <tr>
+              <th>Measurement</th>
+              <th>Outside</th>
+              <th>Inside</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <script>
+      // Global Vars
+      var cur_gid;
+      var cur_mac;
+      var devList;
+      var bleList;
+      var tempList;
+      var humList;
+      var initOnlyGroup5 = false;
+      document.getElementById('climate_chart').style.display = "none";
+      // for converting Python datetime to JSON datetime.
+      function parse_date(item) {
+        var patt1 = /datetime.datetime\([0-9 | ,]+\)/g; 
+        var toReplace = item.match(/[0-9]+/g);
+        var result = item.replace(patt1,toReplace);
+        var date_split = result.split(",");
+        var year = date_split[0];
+        var month = date_split[1];
+        if (month.length == 1) {
+          month = "0" + month;
+        }
+        var day = date_split[2];
+        if (day.length == 1) {
+          day = "0" + day;
+        }
+        var hour = date_split[3];
+        if (hour.length == 1) {
+          hour = "0" + hour;
+        }
+        var min = date_split[4];
+        if (min.length == 1) {
+          min = "0" + min;
+        }
+        var sec = date_split[5];
+        try {
+            if (sec.length == 1) {
+            sec = "0" + sec;
+          }
+        } 
+        catch(err) {
+            sec = "00";
+        }
+        var formatted = "\""+String(month)+"/"+String(day)+"/"+String(year)+" "+String(hour)+":"+String(min)+":"+String(sec)+"\"";
+        devList = devList.replace(item,String(formatted));
+      }
+
+      function parse_single_date(to_parse, to_replace_into) { // returns single string of parsed date instead of list
+        var patt1 = /datetime.datetime\([0-9 | ,]+\)/g; 
+        var toReplace = to_parse.match(/[0-9]+/g);
+        var result = to_parse.replace(patt1,toReplace);
+        var date_split = result.split(",");
+        var year = date_split[0];
+        var month = date_split[1];
+        if (month.length == 1) {
+          month = "0" + month;
+        }
+        var day = date_split[2];
+        if (day.length == 1) {
+          day = "0" + day;
+        }
+        var hour = date_split[3];
+        if (hour.length == 1) {
+          hour = "0" + hour;
+        }
+        var min = date_split[4];
+        if (min.length == 1) {
+          min = "0" + min;
+        }
+        var sec = date_split[5];
+        try {
+            if (sec.length == 1) {
+            sec = "0" + sec;
+          }
+        } 
+        catch(err) {
+            sec = "00";
+        }
+        var formatted = "\""+String(month)+"/"+String(day)+"/"+String(year)+" "+String(hour)+":"+String(min)+":"+String(sec)+"\"";
+        to_replace_into = to_replace_into.replace(to_parse,String(formatted));
+        return to_replace_into
+      }
+
+      function parse_date_temp(item) { // same as parse date but modifies bleList instead of devList
+        var patt1 = /datetime.datetime\([0-9 | ,]+\)/g; 
+        var toReplace = item.match(/[0-9]+/g);
+        var result = item.replace(patt1,toReplace);
+        var date_split = result.split(",");
+        var year = date_split[0];
+        var month = date_split[1];
+        if (month.length == 1) {
+          month = "0" + month;
+        }
+        var day = date_split[2];
+        if (day.length == 1) {
+          day = "0" + day;
+        }
+        var hour = date_split[3];
+        if (hour.length == 1) {
+          hour = "0" + hour;
+        }
+        var min = date_split[4];
+        if (min.length == 1) {
+          min = "0" + min;
+        }
+        var sec = date_split[5];
+        try {
+          if (sec.length == 1) {
+            sec = "0" + sec;
+          }
+        } 
+        catch(err) {
+          sec = "00";
+        }
+        var formatted = "\""+String(month)+"/"+String(day)+" "+String(hour)+":"+String(min)+"\"";
+        tempList = tempList.replace(item,String(formatted));
+      }
+
+      function parse_date_hum(item) { // same as parse date but modifies bleList instead of devList
+        var patt1 = /datetime.datetime\([0-9 | ,]+\)/g; 
+        var toReplace = item.match(/[0-9]+/g);
+        var result = item.replace(patt1,toReplace);
+        var date_split = result.split(",");
+        var year = date_split[0];
+        var month = date_split[1];
+        if (month.length == 1) {
+          month = "0" + month;
+        }
+        var day = date_split[2];
+        if (day.length == 1) {
+          day = "0" + day;
+        }
+        var hour = date_split[3];
+        if (hour.length == 1) {
+          hour = "0" + hour;
+        }
+        var min = date_split[4];
+        if (min.length == 1) {
+          min = "0" + min;
+        }
+        var sec = date_split[5];
+        try {
+          if (sec.length == 1) {
+            sec = "0" + sec;
+          }
+        } 
+        catch(err) {
+          sec = "00";
+        }
+        var formatted = "\""+String(month)+"/"+String(day)+" "+String(hour)+":"+String(min)+"\"";
+        humList = humList.replace(item,String(formatted));
+      }
+      
+      function initMap() {  
+        var start_inp = document.getElementById("startDate");
+        var end_inp = document.getElementById("endDate");
+        var start_date;
+        var end_date;
+        try {
+          start_date = new Date(start_inp.value);
+          end_date = new Date(end_inp.value);
+        }
+        catch {
+          start_date = new Date("06/02 22:00");
+          end_date = new Date("12/31/2099");
+        }
+        var checkbox = document.querySelector('input[type="checkbox"]');
+        checkbox.addEventListener('change', function () {
+          if (checkbox.checked) {
+            initOnlyGroup5=true;
+            console.log('Checked');
+            initMap();
+          } else {
+            initOnlyGroup5=false;
+            console.log('Not checked');
+            initMap();
+          }
+        });
+        document.getElementById('analysisBtn').addEventListener('click', function() {
+          initMap()
+        });
+
+        google.charts.load('current', {
+              callback: drawChart,
+              packages:['corechart', 'Table']
+            });
+        google.charts.load('current', {
+              callback: drawHumChart,
+              packages:['corechart', 'Table']
+            });
+        var urlStr = "http://dsc-iot.ucsd.edu/api_gid05/API.py";
+        function drawChart() {
+          chartHttp = new XMLHttpRequest();
+          chartHttp.onreadystatechange = function() {
+            if (this.readyState == 4 && this.status == 200) {
+              tempList = this.responseText.replace(/'/g,'"').replace(/None/g,'"None"');
+              var patt1 = /datetime.datetime\([0-9 | ,]+\)/g; 
+              var display = tempList.match(patt1)
+              display.forEach(parse_date_temp)
+              var tempData = eval("["+tempList+"]");
+              // console.log(tempData);
+              var gglData = [];
+              gglData.push(['timerstamp', 'Inside', 'Outside', 'Forecasted']);
+              var outside_mac = "CC:50:E3:A8:EB:3C";
+              var outside_temps = [];
+              var inside_temps = [];
+              let only_out = [];
+              let only_in = [];
+              for (let i=0; i < tempData.length;i++) {
+                cur_date = new Date(tempData[i]['timerstamp']);
+                if (cur_date < start_date || cur_date > end_date) {
+                  continue;
+                }
+                if (tempData[i]['mac'] == outside_mac) {
+                  gglData.push([tempData[i]['timerstamp'], null, tempData[i]['temp'], tempData[i]['foreTemp']]);
+                  outside_temps.push([tempData[i]['timerstamp'],tempData[i]['temp']]);
+                  only_out.push(tempData[i]['temp']);
+                }
+                else {
+                  gglData.push([tempData[i]['timerstamp'],tempData[i]['temp'], null, tempData[i]['foreTemp']]);
+                  inside_temps.push([tempData[i]['timerstamp'],tempData[i]['temp']]);
+                  only_in.push(tempData[i]['temp']);
+                }
+              }
+              let out_idx = 0;
+              let in_idx = 0;
+              let out_time;
+              let in_time;
+              let time_diff;
+              let temp_diffs = [];
+
+              for (let i=0; i < inside_temps.length; i++) {
+                if (out_idx >= outside_temps.length) {
+                  break;
+                }
+                in_time = new Date(inside_temps[in_idx][0]);
+                out_time = new Date(outside_temps[out_idx][0]);
+                time_diff = Math.abs(out_time - in_time);
+                
+                if (time_diff < 600001) {
+                  temp_diffs.push(Math.abs(inside_temps[in_idx][1] - outside_temps[out_idx][1]));
+                  in_idx++;
+                  out_idx++;
+                }
+                else {
+                  if (in_time > out_time) {
+                    out_idx++;
+                  }
+                  else {
+                    in_idx++;
+                  }
+                }
+              }
+              var arrAvg = arr => arr.reduce((a,b) => a + b, 0) / arr.length;
+              var arrMax = arr => Math.max(...arr);
+              var arrMin = arr => Math.min(...arr);
+              var in_max = arrMax(only_in);
+              var in_min = arrMin(only_in);
+              var out_max = arrMax(only_out);
+              var out_min = arrMin(only_out);
+              let avg_diff = arrAvg(temp_diffs);
+
+              let tempTable = document.getElementById('temp_table');
+              var x = tempTable.rows.length;
+              for (var i=x-3; i>0; i--) {
+                tempTable.deleteRow(i);
+              }
+              let avgRow = tempTable.insertRow();
+              let titleAvg = avgRow.insertCell(0);
+              let avgData = avgRow.insertCell(1);
+              let avgData2 = avgRow.insertCell(2);
+              titleAvg.innerHTML = "<b>AVG Difference</b>";
+              avgData.innerHTML = avg_diff.toFixed(2);
+              avgData2.innerHTML = avg_diff.toFixed(2);
+
+              let minRow = tempTable.insertRow();
+              let minTitle = minRow.insertCell(0);
+              let minData = minRow.insertCell(1);
+              let minData2 = minRow.insertCell(2);
+              minTitle.innerHTML = "<b>Min Temperature</b>";
+              minData.innerHTML = in_min.toFixed(2);
+              minData2.innerHTML = out_min.toFixed(2);
+
+              let maxRow = tempTable.insertRow();
+              let maxTitle = maxRow.insertCell(0);
+              let maxData = maxRow.insertCell(1);
+              let maxData2 = maxRow.insertCell(2);
+              maxTitle.innerHTML = "<b>Max Temperature</b>";
+              maxData.innerHTML = in_max.toFixed(2);
+              maxData2.innerHTML = out_max.toFixed(2);
+
+              let rangeRow = tempTable.insertRow();
+              let rangeTitle = rangeRow.insertCell(0);
+              let rangeData = rangeRow.insertCell(1);
+              let rangeData2 = rangeRow.insertCell(2);
+              rangeTitle.innerHTML = "<b>Temperature Range</b>"
+              rangeData.innerHTML = (in_max - in_min).toFixed(2);
+              rangeData2.innerHTML = (out_max - out_min).toFixed(2);
+
+              var data = google.visualization.arrayToDataTable(gglData);
+              var view = new google.visualization.DataView(data);
+              view.setColumns([0, 1, 2, 3]);
+              var options = {
+                title: 'Temperature Readings',
+                curveType: 'function',
+                hAxis: {
+                  title: "Date"
+                },
+                vAxis: {
+                  title: "Temperature (C)"
+                },
+                interpolateNulls: true,
+                trendlines: {
+                  n: {
+                    opacity: 0.7,   
+                  }
+                },
+                height:400,
+              };
+              var chart = new google.visualization.LineChart(document.getElementById('analysis_chart'));
+              chart.draw(view, options);
+            }
+          }
+          var analysisObj = {cmd:"INSIDEOUT", mac1:"CC:50:E3:B0:21:8C", mac2:"CC:50:E3:A8:EB:3C",gid:"5"};
+          var analysisStr = JSON.stringify(analysisObj);
+          chartHttp.open("POST", urlStr, true);
+          chartHttp.setRequestHeader('Content-Type', 'application/json');
+          chartHttp.send(analysisStr);
+        }
+
+        function drawHumChart() {
+          chartHttp = new XMLHttpRequest();
+          chartHttp.onreadystatechange = function() {
+            if (this.readyState == 4 && this.status == 200) {
+              humList = this.responseText.replace(/'/g,'"').replace(/None/g,'"None"');
+              var patt1 = /datetime.datetime\([0-9 | ,]+\)/g; 
+              var display = humList.match(patt1);
+              display.forEach(parse_date_hum);
+              var humData = eval("["+humList+"]"); 
+              var gglData = [];
+              gglData.push(['timerstamp', 'Inside', 'Outside', 'Forecasted']);
+              var outside_mac = "CC:50:E3:A8:EB:3C";
+              var outside_hums = [];
+              var inside_hums = [];
+              let only_out = [];
+              let only_in = [];
+              for (let i=0; i < humData.length;i++) {
+                cur_date = new Date(humData[i]['timerstamp']);
+                if (cur_date < start_date || cur_date > end_date) {
+                  continue;
+                }
+                if (humData[i]['mac'] == outside_mac) {
+                  gglData.push([humData[i]['timerstamp'], null, humData[i]['hum'], humData[i]['foreHum']]);
+                  outside_hums.push([humData[i]['timerstamp'],humData[i]['hum']]);
+                  only_out.push(humData[i]['hum']);
+                }
+                else {
+                  gglData.push([humData[i]['timerstamp'],humData[i]['hum'], null, humData[i]['foreHum']]);
+                  inside_hums.push([humData[i]['timerstamp'],humData[i]['hum']]);
+                  only_in.push(humData[i]['hum']);
+                }
+              }
+              let out_idx = 0;
+              let in_idx = 0;
+              let out_time;
+              let in_time;
+              let time_diff;
+              let hum_diffs = [];
+              for (let i=0; i < inside_hums.length; i++) {
+                if (out_idx >= outside_hums.length) {
+                  break;
+                }
+                in_time = new Date(inside_hums[in_idx][0]);
+                out_time = new Date(outside_hums[out_idx][0]);
+                time_diff = Math.abs(out_time - in_time);
+                
+                if (time_diff < 600001) {
+                  hum_diffs.push(Math.abs(inside_hums[in_idx][1] - outside_hums[out_idx][1]));
+                  in_idx++;
+                  out_idx++;
+                }
+                else {
+                  if (in_time > out_time) {
+                    out_idx++;
+                  }
+                  else {
+                    in_idx++;
+                  }
+                }
+              }
+              var arrAvg = arr => arr.reduce((a,b) => a + b, 0) / arr.length;
+              var arrMax = arr => Math.max(...arr);
+              var arrMin = arr => Math.min(...arr);
+              var in_max = arrMax(only_in);
+              var in_min = arrMin(only_in);
+              var out_max = arrMax(only_out);
+              var out_min = arrMin(only_out);
+              let avg_diff = arrAvg(hum_diffs);
+
+              let humTable = document.getElementById('hum_table');
+              var x = humTable.rows.length;
+              for (var i=x-3; i>0; i--) {
+                humTable.deleteRow(i);
+              }
+
+              let avgRow = humTable.insertRow();
+              let titleAvg = avgRow.insertCell(0);
+              let avgData = avgRow.insertCell(1);
+              let avgData2 = avgRow.insertCell(2);
+              titleAvg.innerHTML = "<b>AVG Difference</b>";
+              avgData.innerHTML = avg_diff.toFixed(2);
+              avgData2.innerHTML = avg_diff.toFixed(2);
+
+              let minRow = humTable.insertRow();
+              let minTitle = minRow.insertCell(0);
+              let minData = minRow.insertCell(1);
+              let minData2 = minRow.insertCell(2);
+              minTitle.innerHTML = "<b>Min Humidity</b>";
+              minData.innerHTML = in_min.toFixed(2);
+              minData2.innerHTML = out_min.toFixed(2);
+
+              let maxRow = humTable.insertRow();
+              let maxTitle = maxRow.insertCell(0);
+              let maxData = maxRow.insertCell(1);
+              let maxData2 = maxRow.insertCell(2);
+              maxTitle.innerHTML = "<b>Max Humidity</b>";
+              maxData.innerHTML = in_max.toFixed(2);
+              maxData2.innerHTML = out_max.toFixed(2);
+
+              let rangeRow = humTable.insertRow();
+              let rangeTitle = rangeRow.insertCell(0);
+              let rangeData = rangeRow.insertCell(1);
+              let rangeData2 = rangeRow.insertCell(2);
+              rangeTitle.innerHTML = "<b>Humidity Range</b>"
+              rangeData.innerHTML = (in_max - in_min).toFixed(2);
+              rangeData2.innerHTML = (out_max - out_min).toFixed(2);
+              var data = google.visualization.arrayToDataTable(gglData);
+              var view = new google.visualization.DataView(data);
+              view.setColumns([0, 1, 2, 3]);
+              var options = {
+                title: 'Humidity Readings',
+                curveType: 'function',
+                hAxis: {
+                  title: "Date"
+                },
+                vAxis: {
+                  title: "Humidity (%)"
+                },
+                interpolateNulls: true,
+                trendlines: {
+                  n: {
+                    opacity: 0.7,   
+                  }
+                },
+                height:400,
+              };
+              var chart = new google.visualization.LineChart(document.getElementById('hum_chart'));
+              chart.draw(view, options);
+            }
+          }
+          var humObj = {cmd:"INSIDEOUTHUM", mac1:"CC:50:E3:B0:21:8C", mac2:"CC:50:E3:A8:EB:3C",gid:"5"};
+          var humStr = JSON.stringify(humObj);
+          chartHttp.open("POST", urlStr, true);
+          chartHttp.setRequestHeader('Content-Type', 'application/json');
+          chartHttp.send(humStr);
+        }
+                
+        var allMarkers; // has the list of all device info for initializing
+        var markerObjects;
+        var xmlhttpDEVLIST = new XMLHttpRequest();
+        var jObj = {cmd:"LIST"};    
+        var jStr = JSON.stringify(jObj);
+        
+        xmlhttpDEVLIST.open("POST", urlStr, true);
+        xmlhttpDEVLIST.setRequestHeader('Content-Type', 'application/json');
+        xmlhttpDEVLIST.onreadystatechange = function() {
+          if (xmlhttpDEVLIST.readyState == XMLHttpRequest.DONE) {
+            var ourClassLoc = {lat: 34.2192206, lng: -118.3517104};
+            var map = new google.maps.Map(document.getElementById('map'), {
+              zoom: 8,
+              center: ourClassLoc,
+              title: 'UCSD CSE191'    
+            });
+            devList = this.responseText.replace(/'/g,'"').replace(/None/g,'"None"');
+            var patt1 = /datetime.datetime\([0-9 | ,]+\)/g; 
+            var datetimes = devList.match(patt1)
+            datetimes.forEach(parse_date);
+            devList = "[" + devList + "]";
+            var statsObj = eval(devList);
+            allMarkers = statsObj[0].devices;
+            for (var i = 0; i < allMarkers.length; i++) {
+              if (initOnlyGroup5) {
+                if (allMarkers[i].groupID != 5) {
+                    continue;
+                }
+              }
+              if (typeof allMarkers[i].dev_long != 'number' || typeof allMarkers[i].dev_lat != 'number') {
+                continue;
+              }  
+              try {
+                var latLng = {lng: allMarkers[i].dev_long, lat: allMarkers[i].dev_lat};
+                var curData = allMarkers[i];
+
+                // default red marker color for error or null status
+                var markerColor = "http://maps.google.com/mapfiles/ms/icons/red-dot.png";
+                if (allMarkers[i].status == "OK") {
+                    markerColor = "http://maps.google.com/mapfiles/ms/icons/green-dot.png";
+                } else if (allMarkers[i.status] == "WARNING") {
+                    markerColor = "http://maps.google.com/mapfiles/ms/icons/yellow-dot.png";
+                } else if (allMarkers[i.status] == "TIMEOUT") {
+                    markerColor = "http://maps.google.com/mapfiles/ms/icons/purple-dot.png";
+                }
+                var markerContent = String(curData.groupID) + "//" + curData.mac + "//" + curData.status + "//" + curData.lastseen;
+                var marker = new google.maps.Marker({
+                  position: latLng,
+                  content: markerContent,
+                  map: map,
+                  icon: {
+                    url: markerColor
+                  }
+                });
+
+                var infowindow = new google.maps.InfoWindow({
+                  position: latLng,
+                  maxWidth: 600
+                });
+
+                var bigInfo = new google.maps.InfoWindow({
+                  position: latLng,
+                  maxWidth: 500
+                });
+
+                // MOUSEOVER MARKER
+                marker.addListener('mouseover', function() {
+                  cur_gid = this.content.split("//")[0];
+                  cur_mac = this.content.split("//")[1];
+                  function drawClimateChart() {
+                    var xmlhttp = new XMLHttpRequest();
+                    xmlhttp.onreadystatechange = function() {
+                      if (this.readyState == 4 && this.status == 200) {
+                        bleList = this.responseText.replace(/'/g,'"').replace(/None/g,'"None"');
+                        var xmlSuccess = false;
+                        try {
+                          xmlSuccess = true;
+                          bleList = "[" + bleList + "]";                    
+                          var jsonData = eval(bleList);
+                          // https://stackoverflow.com/questions/43226648/how-to-convert-json-to-google-visualization-datatable loading JSON to google datatable
+                          var gglData = [];
+                          if (jsonData.length > 0) {
+                            // load column headings
+                            var colHead = [];
+                            Object.keys(jsonData[0]).forEach(function (key) {
+                              colHead.push(key);
+                            });
+                            gglData.push(colHead);
+                            // load data rows
+                            jsonData.forEach(function (row) {
+                              var gglRow = [];
+                              Object.keys(row).forEach(function (key) {
+                                gglRow.push(row[key]);
+                              });
+                              gglData.push(gglRow);
+                            });
+                          }
+                          // arrayToDataTable is a static method, "new" keyword not needed
+                          var data = google.visualization.arrayToDataTable(gglData);
+                          var view = new google.visualization.DataView(data);
+                          view.setColumns([2, 0, 1]);
+                          var options = {
+                            title: '24 Hour Temp and Humidity for Group ' + String(cur_gid) + " MAC: "+String(cur_mac),
+                            hAxis: {
+                                title: "Time (hour:min)"
+                            },
+                            trendlines: {
+                              n: {
+                                  opacity: 0.7,   
+                              }
+                            },
+                            height: 400
+                          };
+                          var chart = new google.visualization.LineChart(document.getElementById('climate_chart'));
+                          chart.draw(view, options);
+                          // infowindow.setContent(String(document.getElementById("climate_chart").innerHTML));
+                        }
+                        catch(err) {
+                          console.log(err);
+                          infowindow.setContent("No Data");
+                        }    
+                      }
+                    }
+                    var bleObj = {cmd:"CLIMATESTATS",gid:cur_gid,mac:cur_mac};
+                    var bleStr = JSON.stringify(bleObj);
+                    var urlStr = "http://dsc-iot.ucsd.edu/api_gid05/API.py";
+                    xmlhttp.open("POST", urlStr, true);
+                    xmlhttp.setRequestHeader('Content-Type', 'application/json');
+                    xmlhttp.send(bleStr);
+                  }
+                  // load the climate chart on mouseover 
+                  google.charts.load('current', {
+                    callback: drawClimateChart,
+                    packages:['corechart', 'Table']
+                  });
+                  var thisMarker = this;
+                  var oldIconStatus = this.icon.url;
+                  var xmlhttp = new XMLHttpRequest();
+                  xmlhttp.onreadystatechange = function() {
+                    if (this.readyState == 4 && this.status == 200) {
+                      var thisDevInfo = this.responseText.replace(/'/g,'"').replace(/None/g,'"None"');
+                      var patt1 = /datetime.datetime\([0-9 | ,]+\)/g; 
+                      var display = thisDevInfo.match(patt1);
+                      var xmlSuccess = false;
+                      try {
+                        thisDevInfo=parse_single_date(display[0], thisDevInfo);
+                        thisDevInfo = "[" + thisDevInfo + "]";
+                        thisDevInfo = eval(thisDevInfo)[0].devices[0];
+                        thisMarker.content = String(thisDevInfo.groupID) + "//" + thisDevInfo.mac + "//" + thisDevInfo.status + "//" + thisDevInfo.lastseen;
+                        // check for change in status
+                        if (thisDevInfo.status == "WARNING") {
+                          currentIconStatus = "http://maps.google.com/mapfiles/ms/icons/yellow-dot.png";
+                        } else if (thisDevInfo.status == "OK") {
+                          currentIconStatus = "http://maps.google.com/mapfiles/ms/icons/green-dot.png";
+                        } else if (thisDevInfo.status == "TIMEOUT") {
+                          currentIconStatus = "http://maps.google.com/mapfiles/ms/icons/purple-dot.png";
+                        } else if ((thisDevInfo.status = "ERROR") || (thisDevInfo.status = "None")) {
+                          currentIconStatus = "http://maps.google.com/mapfiles/ms/icons/red-dot.png";
+                        }
+                        // if change in status, change icon
+                        if (oldIconStatus != currentIconStatus) {
+                          thisMarker.setIcon(currentIconStatus);
+                        }
+                        xmlSuccess = true;                        
+                      }
+                      catch(err) {
+                        console.log(err);
+                      }    
+                    }
+                  }
+                  var devObj;
+                  devObj = {cmd:"LIST",gid:this.content.split("//")[0],devmac:this.content.split("//")[1]};        
+                  var devStr = JSON.stringify(devObj);
+                  var urlStr = "http://dsc-iot.ucsd.edu/api_gid05/API.py";
+                  xmlhttp.open("POST", urlStr, true); // make synchronous
+                  xmlhttp.setRequestHeader('Content-Type', 'application/json');
+                  xmlhttp.send(devStr);
+                  try {
+                    infowindow.setContent("Group ID: <b>" + thisMarker.content.split("//")[0] + "</b><br> Device MAC: <b>" + thisMarker.content.split("//")[1] + "</b><br> Status: <b>" + thisMarker.content.split("//")[2] + "</b><br> lastseen: <b>" + thisMarker.content.split("//")[3]+"</b>");
+                  }
+                  catch(err) {
+                    infowindow.setContent("No data");
+                  }
+                  infowindow.open(map, this);
+                });
+
+                marker.addListener('mouseout', function() {
+                  infowindow.close();
+                });
+
+                marker.addListener('click', function() {
+                  bigInfo.open(map, this);
+                  bigInfo.setContent(String(document.getElementById("climate_chart").innerHTML));
+                });
+              } catch(err) {
+                console.log("err")
+              }
+            }
+          }
+          }   
+        xmlhttpDEVLIST.setRequestHeader('Content-Type', 'application/json');
+        xmlhttpDEVLIST.send(jStr);
+      }     
+    </script>
+    // google api needs to be filled in below
+    <script async defer
+      src="googleapikey">
+    </script>
+  </body>
+</html>
+
